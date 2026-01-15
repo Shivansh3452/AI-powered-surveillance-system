@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTRY | AI Surveillance</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --panel-bg: #1e293b;
+            --text-main: #e2e8f0;
+            --accent-red: #ef4444;
+            --accent-green: #10b981;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+        }
+
+        /* SIDEBAR */
+        .sidebar {
+            width: 70px;
+            background: #0b1120;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 20px;
+            border-right: 1px solid #334155;
+        }
+        .icon { font-size: 24px; margin-bottom: 30px; color: #64748b; cursor: pointer; }
+        .icon.active { color: #3b82f6; }
+
+        /* CONTENT */
+        .content { flex: 1; display: flex; flex-direction: column; padding: 20px; gap: 20px; }
+
+        /* GRID */
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            grid-template-rows: 60vh 1fr;
+            gap: 20px;
+            height: 100%;
+        }
+
+        /* VIDEO BOX */
+        .video-box {
+            grid-column: 1 / 2;
+            grid-row: 1 / 3;
+            background: black;
+            border-radius: 10px;
+            position: relative;
+            overflow: hidden;
+            border: 2px solid #334155;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .video-feed { width: 100%; height: 100%; object-fit: contain; z-index: 1; }
+
+        /* The Red Flash Overlay - Fixed Z-Index */
+        #flashOverlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle, transparent 50%, rgba(255, 0, 0, 0.6) 100%);
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+            z-index: 2; /* On top of video */
+        }
+
+        .live-badge {
+            position: absolute; top: 20px; left: 20px;
+            background: red; color: white; padding: 5px 10px;
+            font-weight: bold; border-radius: 4px; z-index: 3;
+        }
+
+        /* INFO PANELS */
+        .info-panel {
+            grid-column: 2 / 3;
+            background: var(--panel-bg);
+            border-radius: 10px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .status-text {
+            font-size: 2rem;
+            font-weight: 800;
+            text-align: center;
+            margin: 20px 0;
+            color: var(--accent-green);
+        }
+
+        .status-danger { color: var(--accent-red); animation: blink 0.5s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+
+        .log-container {
+            flex: 1;
+            background: #0f172a;
+            border-radius: 5px;
+            padding: 10px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9rem;
+            margin-top: 10px;
+        }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #334155; padding-bottom: 2px; }
+        .alert-entry { color: #fca5a5; }
+
+        /* CHART */
+        .chart-box {
+            background: var(--panel-bg);
+            padding: 15px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="icon active"><i class="fas fa-video"></i></div>
+        <div class="icon"><i class="fas fa-chart-bar"></i></div>
+        <div class="icon"><i class="fas fa-cog"></i></div>
+    </div>
+
+    <div class="content">
+        <h2 style="margin: 0;">SENTRY <span style="color:#3b82f6">AI</span> MONITOR</h2>
+        
+        <div class="grid">
+            <div class="video-box">
+                <div id="flashOverlay"></div>
+                <div class="live-badge">● LIVE</div>
+                <img src="http://localhost:8000/video_feed" class="video-feed" onerror="this.style.display='none'; alert('Camera Disconnected')">
+            </div>
+
+            <div class="info-panel">
+                <h3>THREAT STATUS</h3>
+                <div id="statusDisplay" class="status-text">SAFE</div>
+                <hr style="border-color: #334155; width: 100%;">
+                <h4>Event Log</h4>
+                <div id="logArea" class="log-container">
+                    <div class="log-entry">System Initialized...</div>
+                </div>
+            </div>
+            
+            <div class="chart-box">
+                <canvas id="liveChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CHART SETUP ---
+        const ctx = document.getElementById('liveChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(30).fill(''),
+                datasets: [{
+                    label: 'Violence Probability',
+                    data: Array(30).fill(0),
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { min: 0, max: 1 }, x: { display: false } },
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        // --- LIVE DATA LOOP ---
+        const statusDisplay = document.getElementById('statusDisplay');
+        const flashOverlay = document.getElementById('flashOverlay');
+        const logArea = document.getElementById('logArea');
+        let lastLogTime = "";
+
+        setInterval(async () => {
+            try {
+                const res = await fetch('http://localhost:8000/alerts');
+                const data = await res.json();
+
+                // 1. Update Chart
+                const conf = data.confidence || 0;
+                chart.data.datasets[0].data.push(conf);
+                chart.data.datasets[0].data.shift();
+                
+                // Change chart color based on threat
+                if(conf > 0.6) {
+                    chart.data.datasets[0].borderColor = '#ef4444'; 
+                    chart.data.datasets[0].backgroundColor = 'rgba(239, 68, 68, 0.2)';
+                } else {
+                    chart.data.datasets[0].borderColor = '#3b82f6';
+                    chart.data.datasets[0].backgroundColor = 'rgba(59, 130, 246, 0.2)';
+                }
+                chart.update();
+
+                // 2. Status & Alerts
+                if (data.status.includes("CRITICAL") || data.status.includes("ALERT")) {
+                    // Turn UI Red
+                    statusDisplay.innerText = "THREAT DETECTED";
+                    statusDisplay.className = "status-text status-danger";
+                    flashOverlay.style.opacity = 1;
+
+                    // Log Logic
+                    if (data.timestamp !== lastLogTime) {
+                        const time = data.timestamp.split('T')[1].split('.')[0];
+                        const div = document.createElement('div');
+                        div.className = "log-entry alert-entry";
+                        div.innerText = `[${time}] ${data.status} (${(conf*100).toFixed(0)}%)`;
+                        logArea.prepend(div);
+                        lastLogTime = data.timestamp;
+                    }
+                } else {
+                    // Turn UI Green/Normal
+                    statusDisplay.innerText = "SAFE";
+                    statusDisplay.className = "status-text";
+                    flashOverlay.style.opacity = 0;
+                }
+
+            } catch (e) {
+                console.log("Backend offline");
+            }
+        }, 500);
+    </script>
+</body>
+</html>
